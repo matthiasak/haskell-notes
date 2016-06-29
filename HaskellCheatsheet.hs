@@ -1616,3 +1616,628 @@ w00t
 multi word arg
 The program name is:
 arg-test
+
+--building an application that takes some arguments, and adds/removes todo items as a result
+
+import System.Environment
+import System.Directory
+import System.IO
+import Data.List
+
+dispatch :: [(String, [String] -> IO ())]
+dispatch =  [ ("add", add)
+            , ("view", view)
+            , ("remove", remove)
+            ]
+
+main = do
+    (command:args) <- getArgs
+    let (Just action) = lookup command dispatch
+    action args
+
+add :: [String] -> IO ()
+add [fileName, todoItem] = appendFile fileName (todoItem ++ "\n")
+
+view :: [String] -> IO ()
+view [fileName] = do
+    contents <- readFile fileName
+    let todoTasks = lines contents
+        numberedTasks = zipWith (\n line -> show n ++ " - " ++ line) [0..] todoTasks
+    putStr $ unlines numberedTasks
+
+remove :: [String] -> IO ()
+remove [fileName, numberString] = do
+    handle <- openFile fileName ReadMode
+    (tempName, tempHandle) <- openTempFile "." "temp"
+    contents <- hGetContents handle
+    let number = read numberString
+        todoTasks = lines contents
+        newTodoItems = delete (todoTasks !! number) todoTasks
+    hPutStr tempHandle $ unlines newTodoItems
+    hClose handle
+    hClose tempHandle
+    removeFile fileName
+    renameFile tempName fileName
+
+--trying it out
+$ ./todo view todo.txt
+0 - Iron the dishes
+1 - Dust the dog
+2 - Take salad out of the oven
+
+$ ./todo add todo.txt "Pick up children from drycleaners"
+
+$ ./todo view todo.txt
+0 - Iron the dishes
+1 - Dust the dog
+2 - Take salad out of the oven
+3 - Pick up children from drycleaners
+
+$ ./todo remove todo.txt 2
+
+$ ./todo view todo.txt
+0 - Iron the dishes
+1 - Dust the dog
+2 - Pick up children from drycleaners
+
+-- Random Numbers
+import System.Random
+:t random --random :: (RandomGen g, Random a) => g -> (a, g)
+:t mkStdGen --mkStdGen :: Int -> StdGen
+
+random (mkStdGen 100)
+{-
+<interactive>:1:0:
+    Ambiguous type variable `a' in the constraint:
+      `Random a' arising from a use of `random' at <interactive>:1:0-20
+    Probable fix: add a type signature that fixes these type variable(s)
+-}
+
+random (mkStdGen 100) :: (Int, StdGen) --(-1352021624,651872571 1655838864)
+random (mkStdGen 100) :: (Int, StdGen) --(-1352021624,651872571 1655838864) repeats with the same gen
+random (mkStdGen 949494) :: (Int, StdGen) --(539963926,466647808 1655838864) there we go...
+--we can use type annotation to get back different types
+random (mkStdGen 949488) :: (Float, StdGen) --(0.8938442,1597344447 1655838864)
+random (mkStdGen 949488) :: (Bool, StdGen) --(False,1485632275 40692)
+random (mkStdGen 949488) :: (Integer, StdGen) --(1691547873,1597344447 1655838864)
+
+--generate random coins
+threeCoins :: StdGen -> (Bool, Bool, Bool)
+threeCoins gen =
+    let (firstCoin, newGen) = random gen
+        (secondCoin, newGen') = random newGen
+        (thirdCoin, newGen'') = random newGen'
+    in  (firstCoin, secondCoin, thirdCoin)
+
+threeCoins (mkStdGen 21) --(True,True,True)
+threeCoins (mkStdGen 22) --(True,False,True)
+threeCoins (mkStdGen 943) --(True,False,True)
+threeCoins (mkStdGen 944) --(True,True,True)
+--Notice that we didn't have to do random gen :: (Bool, StdGen). That's because we already specified that we want booleans in the type declaration of the function.
+
+--So what if we want to flip four coins? Or five? Well, there's a function called randoms
+take 5 $ randoms (mkStdGen 11) :: [Int] --[-1807975507,545074951,-1015194702,-1622477312,-502893664]
+take 5 $ randoms (mkStdGen 11) :: [Bool] --[True,True,True,True,False]
+take 5 $ randoms (mkStdGen 11) :: [Float] --[7.904789e-2,0.62691015,0.26363158,0.12223756,0.38291094]
+
+--here's how randoms works
+randoms' :: (RandomGen g, Random a) => g -> [a]
+randoms' gen = let (value, newGen) = random gen in value:randoms' newGen
+
+--What if we want a random value in some sort of range? All the random integers so far were outrageously big or small. What if we want to to throw a die? Well, we use randomR for that purpose.
+:t randomR --randomR :: (RandomGen g, Random a) :: (a, a) -> g -> (a, g)
+randomR (1,6) (mkStdGen 359353) --(6,1494289578 40692)
+randomR (1,6) (mkStdGen 35935335) --(3,1250031057 40692)
+
+--and randomRs
+take 10 $ randomRs ('a','z') (mkStdGen 3) :: [Char] --"ndkxbvmomg"
+
+--this all has to do with IO because we can pass a generator into a program to be used
+import System.Random
+
+:t getStdGen --IO StdGen
+
+main = do
+    gen <- getStdGen
+    putStr $ take 20 (randomRs ('a','z') gen)
+
+$ runhaskell random_string.hs
+pybphhzzhuepknbykxhe
+$ runhaskell random_string.hs
+eiqgcxykivpudlsvvjpg
+$ runhaskell random_string.hs
+nzdceoconysdgcyqjruo
+$ runhaskell random_string.hs
+bakzhnnuzrkgvesqplrx
+
+--CAUTION: doing the following will print the same string twice; random generator is created only once per program invocation
+import System.Random
+
+main = do
+    gen <- getStdGen
+    putStrLn $ take 20 (randomRs ('a','z') gen)
+    gen2 <- getStdGen
+    putStr $ take 20 (randomRs ('a','z') gen2)
+
+--Exceptions - using catch
+import System.Environment
+import System.IO
+import System.IO.Error
+
+main = toTry `catch` handler
+
+toTry :: IO ()
+toTry = do (fileName:_) <- getArgs
+           contents <- readFile fileName
+           putStrLn $ "The file has " ++ show (length (lines contents)) ++ " lines!"
+
+handler :: IOError -> IO ()
+handler :: IOError -> IO ()
+handler e
+    | isDoesNotExistError e = putStrLn "The file doesn't exist!"
+    | isFullError e = freeSomeSpace
+    | isIllegalOperation e = notifyCops
+    | otherwise = ioError e
+
+--The predicates that act on IOError are:
+
+isAlreadyExistsError
+isDoesNotExistError
+isAlreadyInUseError
+isFullError
+isEOFError
+isIllegalOperation
+isPermissionError
+isUserError
+
+--solving problems functionally
+{-THE RPN PROBLEM - REVERSE POLISH NOTATION-}
+import Data.List
+
+solveRPN :: (Num a) => String -> a
+solveRPN expression = head (foldl foldingFunction [] (words expression))
+    where   foldingFunction stack item = ...
+
+--We can make this point-free
+import Data.List
+
+solveRPN :: (Num a) => String -> a
+solveRPN = head . foldl foldingFunction [] . words
+    where   foldingFunction stack item = ...
+
+--final implementation
+solveRPN :: (Num a, Read a) => String -> a
+solveRPN = head . foldl foldingFunction [] . words
+    where   foldingFunction (x:y:ys) "*" = (x * y):ys  --pattern matching!
+            foldingFunction (x:y:ys) "+" = (x + y):ys  --pattern matching!
+            foldingFunction (x:y:ys) "-" = (y - x):ys  --pattern matching!
+            foldingFunction xs numberString = read numberString:xs
+
+solveRPN "10 4 3 + 2 * -" ---4
+solveRPN "2 3 +" --5
+solveRPN "90 34 12 33 55 66 + * - +" ---3947
+solveRPN "90 34 12 33 55 66 + * - + -" --4037
+solveRPN "90 34 12 33 55 66 + * - + -" --4037
+solveRPN "90 3 -" --87
+
+--handle a few more operators
+import Data.List
+
+solveRPN :: String -> Float
+solveRPN = head . foldl foldingFunction [] . words
+    where   foldingFunction (x:y:ys) "*" = (x * y):ys
+            foldingFunction (x:y:ys) "+" = (x + y):ys
+            foldingFunction (x:y:ys) "-" = (y - x):ys
+            foldingFunction (x:y:ys) "/" = (y / x):ys
+            foldingFunction (x:y:ys) "^" = (y ** x):ys
+            foldingFunction (x:xs) "ln" = log x:xs
+            foldingFunction xs "sum" = [sum xs]
+            foldingFunction xs numberString = read numberString:xs
+
+solveRPN "2.7 ln" --0.9932518
+solveRPN "10 10 10 10 sum 4 /" --10.0
+solveRPN "10 10 10 10 10 sum 4 /" --12.5
+solveRPN "10 2 ^" --100.0
+solveRPN "43.2425 0.5 ^" --6.575903
+
+{-
+
+Heathrow to London
+
+Your plane has just landed in England and you rent a car. You have a meeting really soon and you have to get from Heathrow Airport to London as fast as you can (but safely!).
+
+We have a weighted graph, where the weights is the time needed to get across one section, and there are several ways to get to the meeting.
+
+Picture of road system and time b/w points:
+
+A - 50 - A1 - 05 - A2 - 40 - A3 - 10 - A4
+         30        20        25        0
+B - 70 - B1 - 90 - B2 - 02 - B3 - 08 - B4
+
+We can start at A or B, but we need to get to B4 (meeting point)
+
+-}
+
+data Section = Section { getA :: Int, getB :: Int, getC :: Int } deriving (Show)
+type RoadSystem = [Section]
+
+heathrowToLondon :: RoadSystem
+heathrowToLondon = [Section 50 10 30, Section 5 90 20, Section 40 2 25, Section 10 8 0]
+
+data Label = A | B | C deriving (Show)
+type Path = [(Label, Int)]
+
+optimalPath :: RoadSystem -> Path
+--heathrowToLondon should return [(B,10),(C,30),(A,5),(C,20),(B,2),(B,8)]
+roadStep :: (Path, Path) -> Section -> (Path, Path)
+roadStep (pathA, pathB) (Section a b c) =
+    let priceA = sum $ map snd pathA
+        priceB = sum $ map snd pathB
+        forwardPriceToA = priceA + a
+        crossPriceToA = priceB + b + c
+        forwardPriceToB = priceB + b
+        crossPriceToB = priceA + a + c
+        newPathToA = if forwardPriceToA <= crossPriceToA
+                        then (A,a):pathA
+                        else (C,c):(B,b):pathB
+        newPathToB = if forwardPriceToB <= crossPriceToB
+                        then (B,b):pathB
+                        else (C,c):(A,a):pathA
+    in  (newPathToA, newPathToB)
+
+roadStep ([], []) (head heathrowToLondon) --([(C,30),(B,10)],[(B,10)])
+
+optimalPath :: RoadSystem -> Path
+optimalPath roadSystem =
+    let (bestAPath, bestBPath) = foldl roadStep ([],[]) roadSystem
+    in  if sum (map snd bestAPath) <= sum (map snd bestBPath)
+            then reverse bestAPath
+            else reverse bestBPath
+
+optimalPath heathrowToLondon --[(B,10),(C,30),(A,5),(C,20),(B,2),(B,8),(C,0)]
+
+{-more on Functors-}
+
+--IO implements the Functor interface; here's how...
+instance Functor IO where
+    fmap f action = do
+        result <- action
+        return (f result)
+
+--handle user input with fmap
+main = do line <- fmap reverse getLine
+          putStrLn $ "You said " ++ line ++ " backwards!"
+          putStrLn $ "Yes, you really said" ++ line ++ " backwards!"
+
+--do some more to the data
+import Data.Char
+import Data.List
+
+main = do line <- fmap (intersperse '-' . reverse . map toUpper) getLine
+          putStrLn line
+
+$ runhaskell fmapping_io.hs
+hello there
+E-R-E-H-T- -O-L-L-E-H
+
+--Functor (->) r
+(->) r
+-- is also
+(r ->)
+
+r -> a
+-- is also
+(->) r a
+
+
+--so
+(->) r
+-- is also
+(r ->) --but this is not valid syntax
+
+--Functions are Functors, because Functions can be mapped like Functors!
+import Control.Monad.Instances
+
+instance Functor ((->) r) where
+    fmap f g = (\x -> f (g x))
+
+-- this is just fn composition, so we could do...
+instance Functor ((->) r) where
+    fmap = (.)
+
+:t fmap (*3) (+100) -- fmap (*3) (+100) :: (Num a) => a -> a
+fmap (*3) (+100) 1 -- 303
+(*3) `fmap` (+100) $ 1 -- 303
+(*3) . (+100) $ 1 -- 303
+fmap (show . (*3)) (*100) 1 -- "300"
+
+:t fmap (*2) -- fmap (*2) :: (Num a, Functor f) => f a -> f a
+:t fmap (replicate 3) -- fmap (replicate 3) :: (Functor f) => f a -> f [a]
+fmap (replicate 3) [1,2,3,4] --[[1,1,1],[2,2,2],[3,3,3],[4,4,4]]
+fmap (replicate 3) (Just 4) --Just [4,4,4]
+fmap (replicate 3) (Right "blah") --Right ["blah","blah","blah"]
+fmap (replicate 3) Nothing --Nothing
+fmap (replicate 3) (Left "foo") --Left "foo"
+
+-- cool rules of Functors
+fmap (f . g) = fmap f . fmap g
+fmap (f . g) F = fmap f (fmap g F)
+
+--so calling fmap on any Functor should work!! including composition
+fmap (*2) (+1) (Just 5)
+
+{-
+    Applicative Functors
+-}
+import Control.Applicative -- gives us the Applicative typeclass
+
+:t fmap (++) (Just "hey") --fmap (++) (Just "hey") :: Maybe ([Char] -> [Char])
+:t fmap compare (Just 'a') --fmap compare (Just 'a') :: Maybe (Char -> Ordering)
+:t fmap compare "A LIST OF CHARS" --fmap compare "A LIST OF CHARS" :: [Char -> Ordering]
+:t fmap (\x y z -> x + y / z) [3,4,5,6] --fmap (\x y z -> x + y / z) [3,4,5,6] :: (Fractional a) => [a -> a -> a]
+
+-- Functors (like Maybe) can contain Functions (i.e. the Applicative Functor)
+let a = fmap (*) [1,2,3,4] -- a is [*1, *2, *3, *4]
+:t a --a :: [Integer -> Integer]
+fmap (\f -> f 9) a --[9,18,27,36] (for each function in a, invoke it with 9 as input)
+
+--Meet the Applicative typeclass. It lies in the Control.Applicative module and it defines two methods, pure and <*>.
+--Here is the Applicative definition
+class (Functor f) => Applicative f where
+    pure :: a -> f a
+    (<*>) :: f (a -> b) -> f a -> f b
+
+instance Applicative Maybe where
+    pure = Just
+    Nothing <*> _ = Nothing
+    (Just f) <*> something = fmap f something
+
+Just (+3) <*> Just 9 --Just 12
+pure (+3) <*> Just 10 --Just 13
+pure (+3) <*> Just 9 --Just 12
+Just (++"hahah") <*> Nothing --Nothing
+Nothing <*> Just "woot" --Nothing
+
+--<*> is left associative, so pure (+) <*> Just 3 <*> Just 5  is equiv to (pure (+) <*> Just 3) <*> Just 5
+pure (+) <*> Just 3 <*> Just 5 --Just 8
+pure (+) <*> Just 3 <*> Nothing --Nothing
+pure (+) <*> Nothing <*> Just 5 --Nothing
+
+pure f <*> x <*> y <*> ... --Applicative functors and the applicative style of doing pure f <*> x <*> y <*> ... allow us to take a function that expects parameters that aren't necessarily wrapped in functors and use that function to operate on several values that are in functor contexts.
+--remember that
+pure f <*> x
+-- is the same as
+fmap f x
+-- so instead of
+pure f <*> x <*> y <*> ...
+-- we can write
+fmap f x <*> y <*> ...
+
+--Control.Applicative exports a function <$> for this
+(<$>) :: (Functor f) => (a -> b) -> f a -> f b
+f <$> x = fmap f x
+-- Functor equiv of $
+-- now we can just write
+f <$> x <*> y <*> z <*> ...
+
+-- example
+(++) "johntra" "volta" -- "johntravolta"
+(++) <$> Just "johntra" <*> Just "volta" -- Just "johntravolta"
+-- for (++) gets mapped over Just "johntra", returns type Maybe ([Char] -> [Char]), then this Applicate Functor is used to map over Just "volta"
+
+-- [] (the List constructor) is an Applicative Functor
+instance Applicative [] where
+    pure x = [x]
+    fs <*> xs = [f x | f <- fs, x <- xs]
+
+pure "Hey" :: [String] --["Hey"]
+pure "Hey" :: Maybe String --Just "Hey"
+
+[(*0),(+100),(^2)] <*> [1,2,3] --[0,0,0,101,102,103,1,4,9]
+[(+),(*)] <*> [1,2] <*> [3,4] --[4,5,5,6,3,4,6,8]
+--[(+),(*)] <*> [1,2] <*> [3,4]
+--[(1+),(2+),(1*),(2*)] <*> [3,4]
+--[4,5,5,6,3,4,6,8]
+
+(++) <$> ["ha","heh","hmm"] <*> ["?","!","."] --["ha?","ha!","ha.","heh?","heh!","heh.","hmm?","hmm!","hmm."]
+
+[ x*y | x <- [2,5,10], y <- [8,10,11]] --[16,20,22,40,50,55,80,100,110]
+--same as
+(*) <$> [2,5,10] <*> [8,10,11] --[16,20,22,40,50,55,80,100,110]
+
+filter (>50) $ (*) <$> [2,5,10] <*> [8,10,11] --[55,80,100,110]
+
+--IO is also an Applicative
+instance Applicative IO where
+    pure = return
+    a <*> b = do
+        f <- a
+        x <- b
+        return (f x)
+
+-- i.e. IO f <*> IO 5 --> IO (f 5)
+
+--in otherwords, the following 2 code blocks are the same
+myAction :: IO String
+myAction = do
+    a <- getLine
+    b <- getLine
+    return $ a ++ b
+
+--same as
+myAction :: IO String
+myAction = (++) <$> getLine <*> getLine
+
+main = do
+    a <- (++) <$> getLine <*> getLine
+    putStrLn $ "The two lines concatenated turn out to be: " ++ a
+
+-- partially applied functions are Functors
+instance Applicative ((->) r) where
+    pure x = (\_ -> x)
+    f <*> g = \x -> f x (g x)
+
+:t (+) <$> (+3) <*> (*100) --:: (Num a) => a -> a
+(+) <$> (+3) <*> (*100) $ 5 --508
+-- \x -> (3 + x) + (100 * x) $ 5
+
+(\x y z -> [x,y,z]) <$> (+3) <*> (*2) <*> (/2) $ 5 --[8.0,10.0,2.5]
+--\h -> fmap (\x y z -> [x,y,z])(+3)(*2)(/2) h $ 5
+--(\h -> fmap [+3,*2,/2] h) $ 5
+--[8,10,2.5]
+--The 5 gets fed to each of the three functions and then \x y z -> [x, y, z] gets called with those results.
+
+--so...
+(+) <$> (+10) <*> (+5) --\x -> (10+x) + (5+x)
+(+) <$> (+10) <*> (+5) $ 2 --19
+
+
+import Control.Applicative -- gives us ZipList as well, about to be covered, which uses the zipWith fn
+-- remember how.... ?
+[(+3),(*2)] <*> [1,2] -- yields [1+3, 2+3, 1*2, 2*2] ?
+-- what if we wanted it to yield [1+2, 2*2] like a ziplist?
+
+-- this is why the ZipList type exists, so that we can make an Applicative from another list-like value to do this other action
+instance Applicative ZipList where
+        pure x = ZipList (repeat x)
+        ZipList fs <*> ZipList xs = ZipList (zipWith (\f x -> f x) fs xs)
+
+getZipList $ (+) <$> ZipList [1,2,3] <*> ZipList [100,100,100] --[101,102,103]
+getZipList $ (+) <$> ZipList [1,2,3] <*> ZipList [100,100..] --[101,102,103]
+getZipList $ max <$> ZipList [1,2,3,4,5,3] <*> ZipList [5,3,1,2] --[5,3,3,4]
+getZipList $ (,,) <$> ZipList "dog" <*> ZipList "cat" <*> ZipList "rat" --[('d','c','r'),('o','a','a'),('g','t','t')]
+
+-- note: (,,) is the same as \x y z -> (x,y,z), just like (,) is the same as \x y -> (x,y)
+
+import Control.Applicative --gives us liftA2
+liftA2 :: (Applicative f) => (a -> b -> c) -> f a -> f b -> f c
+liftA2 f a b = f <$> a <*> b
+
+fmap (\x -> [x]) (Just 4) --Just [4]
+liftA2 (:) (Just 3) (Just [4]) --Just [3,4]
+(:) <$> Just 3 <*> Just [4] --Just [3,4]
+
+--sequenceA also comes from Control.Applicative, for when we have a sequence of Applicatives
+sequenceA :: (Applicative f) => [f a] -> f [a]
+sequenceA [] = pure []
+sequenceA (x:xs) = (:) <$> x <*> sequenceA xs
+-- can also be implemented like so...
+sequenceA :: (Applicative f) => [f a] -> f [a]
+sequenceA = foldr (liftA2 (:)) (pure [])
+
+sequenceA [Just 3, Just 2, Just 1] --Just [3,2,1]
+sequenceA [Just 3, Nothing, Just 1] --Nothing
+sequenceA [(+3),(+2),(+1)] 3 --[6,5,4]
+sequenceA [[1,2,3],[4,5,6]] --[[1,4],[1,5],[1,6],[2,4],[2,5],[2,6],[3,4],[3,5],[3,6]]
+sequenceA [[1,2,3],[4,5,6],[3,4,4],[]] --[]
+
+map (\f -> f 7) [(>4),(<10),odd] --[True,True,True]
+and $ map (\f -> f 7) [(>4),(<10),odd] --True
+sequenceA [(>4),(<10),odd] 7 --[True,True,True]
+and $ sequenceA [(>4),(<10),odd] 7 --True
+
+-- sequenceA is a bit like list comprehension
+sequenceA [[1,2,3],[4,5,6]] --[[1,4],[1,5],[1,6],[2,4],[2,5],[2,6],[3,4],[3,5],[3,6]]
+-- (foldR (liftA2 :)) (pure []) ([[1,2,3],[4,5,6]])
+-- (foldR (liftA2 :) [1,2,3] []) --> [1:, 2:, 3:]... and so forth
+[[x,y] | x <- [1,2,3], y <- [4,5,6]] --[[1,4],[1,5],[1,6],[2,4],[2,5],[2,6],[3,4],[3,5],[3,6]]
+sequenceA [[1,2],[3,4]] --[[1,3],[1,4],[2,3],[2,4]]
+[[x,y] | x <- [1,2], y <- [3,4]] --[[1,3],[1,4],[2,3],[2,4]]
+sequenceA [[1,2],[3,4],[5,6]] --[[1,3,5],[1,3,6],[1,4,5],[1,4,6],[2,3,5],[2,3,6],[2,4,5],[2,4,6]]
+[[x,y,z] | x <- [1,2], y <- [3,4], z <- [5,6]] --[[1,3,5],[1,3,6],[1,4,5],[1,4,6],[2,3,5],[2,3,6],[2,4,5],[2,4,6]]
+
+{-newtype keyword-}
+newtype
+
+[(+1),(*100),(*5)] <*> [1,2,3] --[2,3,4,100,200,300,5,10,15]
+-- can we instead get [1+1, 2*100, 3*5] ?
+-- yes, with ZipList
+import Control.Applicative -- gives us ZipList
+getZipList $ ZipList [(+1),(*100),(*5)] <*> ZipList [1,2,3] --[2,200,15]
+--The newtype keyword in Haskell is made exactly for these cases when we want to just take one type and wrap it in something to present it as another type
+-- ZipList constructor
+newtype ZipList a = ZipList { getZipList :: [a] }
+-- newtype is faster and lazy; it doesn't box ZipList inside a List, instead at aliases ZipList and extends it into a whole new type
+-- when should we use data? Well, when you make a new type from an existing type by using the newtype keyword, you can only have one value constructor and that value constructor can only have one field. But with data, you can make data types that have several value constructors and each constructor can have zero or more fields:
+
+-- good use case for `data`
+data Profession = Fighter | Archer | Accountant
+data Race = Human | Elf | Orc | Goblin
+data PlayerCharacter = PlayerCharacter Race Profession
+
+-- test out newtype
+newtype CharList = CharList { getCharList :: [Char] } deriving (Eq, Show)
+CharList "this will be shown!" --CharList {getCharList = "this will be shown!"}
+CharList "benny" == CharList "benny" --True
+CharList "benny" == CharList "oisters" --False
+getCharList $ CharList "this will be shown!" -- "this will be shown!"
+:t CharList --CharList :: [Char] -> CharList
+:t getCharList -- :: CharList -> [Char]
+
+--It's easy to make Maybe an instance of Functor, because the Functor type class is defined like this:
+class Functor f where
+    fmap :: (a -> b) -> f a -> f b
+
+--So we just start out with:
+instance Functor Maybe where
+    fmap :: (a -> b) -> Maybe a -> Maybe b
+
+--but newtype can only take one input, not two, i.e. to create a Functor that can map over a tuple of two values
+--To get around this, we can newtype our tuple in such a way that the second type parameter represents the type of the first component in the tuple
+newtype Pair b a = Pair { getPair :: (a,b) }
+
+--And now, we can make it an instance of Functor so that the function is mapped over the first component:
+instance Functor (Pair c) where  --**we can pattern match on types defined with newtype.**
+    fmap f (Pair (x,y)) = Pair (f x, y)
+
+:t fmap --if fmap was defined to only work on Pairs, the :t would look like
+--fmap :: (a -> b) -> Pair c a -> Pair c b
+
+getPair $ fmap (*100) (Pair (2,3)) --(200,3)
+getPair $ fmap reverse (Pair ("london calling", 3)) --("gnillac nodnol",3)
+
+--newtype is lazy
+--The undefined value in Haskell represents an erronous computation.
+undefined --*** Exception: Prelude.undefined
+--but
+head [3,4,5,undefined,2,undefined] -- 3
+--haskell is lazy :), doesn't run into an error in this list cause we never tried to print out undefined
+--now consider
+data CoolBool = CoolBool { getCoolBool :: Bool }
+helloMe :: CoolBool -> String
+helloMe (CoolBool _) = "hello"
+helloMe -- "hello"
+helloMe 1 -- "hello"
+helloMe undefined -- "*** Exception: Prelude.undefined
+--uh-oh :( what happened????
+-- Types defined with the data keyword can have multiple value constructors (even though CoolBool only has one). So in order to see if the value given to our function conforms to the (CoolBool _) pattern, Haskell has to evaluate the value just enough to see which value constructor was used when we made the value hence the error.
+
+newtype CoolBool = CoolBool { getCoolBool :: Bool }
+helloMe undefined -- "hello"
+
+-- why did that work? well, when we use newtype, Haskell can internally represent the values of the new type in the same way as the original values
+-- because Haskell knows that types made with the newtype keyword can only have one constructor, it doesn't have to evaluate the value passed to the function to make sure that it conforms to the (CoolBool _) pattern
+
+{-
+** type vs. newtype vs. data **
+-}
+
+-- type - makes synonyms
+-- We use type synonyms when we want to make our type signatures more descriptive by giving types names that tell us something about their purpose in the context of the functions where they're being used.
+type IntList = [Int]
+([1,2,3] :: IntList) ++ ([1,2,3] :: [Int]) -- [1,2,3,1,2,3]
+
+-- newtype -  taking existing types and wrapping them in new types, mostly so that it's easier to make them instances of certain type classes
+newtype CharList = CharList { getCharList :: [Char] }
+("test" :: CharList) ++ " a word" -- Error, Not synonymous or a subtype of [Char]
+
+-- data - for making your own data types and with them, you can go hog wild
+-- can have as many constructors and fields as you wish and can be used to implement any algebraic data type by yourself
+data Person = Matt | Brian | Jwo | Justin | Christie derives (Eq, Read, Show)
+
+{-
+If you just want your type signatures to look cleaner and be more descriptive ---------> type synonyms
+If you want to take an existing type to make it an instance of a type class   ---------> newtype
+If you want to make something completely new                                  ---------> data
+-}
+
