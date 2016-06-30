@@ -2241,3 +2241,309 @@ If you want to take an existing type to make it an instance of a type class   --
 If you want to make something completely new                                  ---------> data
 -}
 
+{-
+**Monoids**
+-}
+
+--A monoid is when you have an associative binary function and a value which acts as an identity with respect to that function.
+--i.e. ++ or *, (but not -)
+(3 * 2) * (8 * 5) --240
+3 * (2 * (8 * 5)) --240
+"la" ++ ("di" ++ "da") --"ladida"
+("la" ++ "di") ++ "da" --"ladida"
+(5 - 3) - 4 -- -2
+5 - (3 - 4) -- 6
+-- 1 is the identity w.r.t. *
+-- [] is the identity w.r.t. ++
+-- 0 is the identity w.r.t. +
+
+import Data.Monoid -- gives us Monoid
+
+class Monoid m where
+    mempty :: m
+    mappend :: m -> m -> m
+    mconcat :: [m] -> m
+    mconcat = foldr mappend mempty
+
+:k Monoid -- * -> *, so m is a CONCRETE kind
+
+-- mempty represents the identity value
+-- mappend is the binary fn, takes two vals of the type, returns one value
+-- mconcat takes a list an mappends them together
+
+-- laws of Monoids
+{-
+mempty `mappend` x = x
+x `mappend` mempty = x -- associative :)
+(x `mappend` y) `mappend` z = x `mappend` (y `mappend` z) -- commutative :)
+-}
+
+-- lists are monoids
+instance Monoid [a] where
+    mempty = []
+    mappend = (++)
+
+[1,2,3] `mappend` [4,5,6] --[1,2,3,4,5,6]
+("one" `mappend` "two") `mappend` "tree" --"onetwotree"
+"one" `mappend` ("two" `mappend` "tree") --"onetwotree"
+"one" `mappend` "two" `mappend` "tree" --"onetwotree"
+"pang" `mappend` mempty --"pang"
+mconcat [[1,2],[3,6],[9]] --[1,2,3,6,9] -- Because mconcat has a default implementation, we get it for free when we make something an instance of Monoid
+mempty :: [a] --[]  (we want the list instance!! had to specify here)
+
+--Data.Monoid exports types Product and Sum, also
+newtype Product a =  Product { getProduct :: a }
+    deriving (Eq, Ord, Read, Show, Bounded)
+
+instance Num a => Monoid (Product a) where
+    mempty = Product 1
+    Product x `mappend` Product y = Product (x * y)
+
+getProduct $ Product 3 `mappend` Product 9 --27
+getProduct $ Product 3 `mappend` mempty --3
+getProduct $ Product 3 `mappend` Product 4 `mappend` Product 2 --24
+getProduct . mconcat . map Product $ [3,4,2] --24
+
+-- Sum is defined almost like Product is
+getSum $ Sum 2 `mappend` Sum 9 --11
+getSum $ mempty `mappend` Sum 3 --3
+getSum . mconcat . map Sum $ [1,2,3] --6
+
+-- Any and All - Bools also have Monoids
+newtype Any = Any { getAny :: Bool }
+    deriving (Eq, Ord, Read, Show, Bounded)
+
+instance Monoid Any where
+        mempty = Any False
+        Any x `mappend` Any y = Any (x || y)
+
+getAny $ Any True `mappend` Any False --True
+getAny $ mempty `mappend` Any True --True
+getAny . mconcat . map Any $ [False, False, False, True] --True
+getAny $ mempty `mappend` mempty --False
+
+newtype All = All { getAll :: Bool }
+        deriving (Eq, Ord, Read, Show, Bounded)
+
+instance Monoid All where
+        mempty = All True
+        All x `mappend` All y = All (x && y)
+
+getAll $ mempty `mappend` All True --True
+getAll $ mempty `mappend` All False --False
+getAll . mconcat . map All $ [True, True, True] --True
+getAll . mconcat . map All $ [True, True, False] --False
+
+--Ordering is a Monoid
+instance Monoid Ordering where
+    mempty = EQ
+    LT `mappend` _ = LT
+    EQ `mappend` y = y
+    GT `mappend` _ = GT
+
+LT `mappend` GT -- LT
+GT `mappend` LT -- GT
+mempty `mappend` LT -- LT
+mempty `mappend` GT -- GT
+
+import Data.Monoid
+lengthCompare :: String -> String -> Ordering
+lengthCompare x y = (length x `compare` length y) `mappend`
+                    (x `compare` y)
+
+lengthCompare "zen" "ants" --LT
+lengthCompare "zen" "ant" --GT
+
+{-Maybe the Moonoid-}
+
+instance Monoid a => Monoid (Maybe a) where
+    mempty = Nothing
+    Nothing `mappend` m = m
+    m `mappend` Nothing = m
+    Just m1 `mappend` Just m2 = Just (m1 `mappend` m2)
+
+Nothing `mappend` Just "andy" --Just "andy"
+Just LT `mappend` Nothing --Just LT
+Just (Sum 3) `mappend` Just (Sum 4) --Just (Sum {getSum = 7})
+
+{-
+One of the more interesting ways to put monoids to work is to make them help us define folds over various data structures. So far, we've only done folds over lists, but lists aren't the only data structure that can be folded over. We can define folds over almost any data structure. Trees especially lend themselves well to folding.
+
+Folding with Monoids
+-}
+
+import qualified Foldable as F
+-- or
+:t + Foldable
+
+foldr (*) 1 [1,2,3] --6
+F.foldr (*) 1 [1,2,3] --6
+
+F.foldl (+) 2 (Just 9) --11
+F.foldr (||) False (Just True) --True
+
+-- we can even fold over a Tree
+data Tree a = Empty | Node a (Tree a) (Tree a) deriving (Show, Read, Eq)
+instance F.Foldable Tree where
+    foldMap f Empty = mempty
+    foldMap f (Node x l r) = F.foldMap f l `mappend`
+                             f x           `mappend`
+                             F.foldMap f r
+
+testTree = Node 5
+            (Node 3
+                (Node 1 Empty Empty)
+                (Node 6 Empty Empty)
+            )
+            (Node 9
+                (Node 8 Empty Empty)
+                (Node 10 Empty Empty)
+            )
+
+F.foldl (+) 0 testTree --42
+F.foldl (*) 1 testTree --64800
+
+getAny $ F.foldMap (\x -> Any $ x == 3) testTree -- True
+getAny $ F.foldMap (\x -> Any $ x > 15) testTree -- False
+F.foldMap (\x -> [x]) testTree -- [1,3,6,5,8,9,10]
+
+{-
+**MONADS**
+-}
+(>>=) :: (Monad m) => m a -> (a -> m b) -> m b
+-- a Monad of type m takes a monadic a, a fn that takes a and returns a monadic b, and returns a monadic b
+-- >>= is called *bind*
+
+class Monad m where
+    return :: a -> m a
+
+    (>>=) :: m a -> (a -> m b) -> m b
+
+    (>>) :: m a -> m b -> m b
+    x >> y = x >>= \_ -> y
+
+    fail :: String -> m a
+    fail msg = error msg
+
+instance Monad Maybe where
+    return x = Just x
+    Nothing >>= f = Nothing
+    Just x >>= f  = f x
+    fail _ = Nothing
+
+return "WHAT" :: Maybe String --Just "WHAT"
+Just 9 >>= \x -> return (x*10) --Just 90
+Nothing >>= \x -> return (x*10) --Nothing
+
+-- tight-roping example (birds that land on Pole)
+-- type synonyms
+type Birds = Int
+type Pole = (Birds,Birds)
+-- create our own "pipe" operator
+x -: f = f x
+100 -: (*3) --300
+True -: not --False
+(0,0) -: (\n (x,y) -> (x+n, y)) 2 --(2,0)
+
+landLeft :: Birds -> Pole -> Maybe Pole
+landLeft n (left,right)
+    | abs ((left + n) - right) < 4 = Just (left + n, right)
+    | otherwise                    = Nothing
+
+landRight :: Birds -> Pole -> Maybe Pole
+landRight n (left,right)
+    | abs (left - (right + n)) < 4 = Just (left, right + n)
+    | otherwise                    = Nothing
+
+landLeft 2 (0,0) -- Just (2,0)
+landLeft 10 (0,3) -- Nothing
+landRight 1 (0,0) >>= landLeft 2 -- Just (2,1); so >>= works a bit like an extract-then-pipe
+return (0,0) >>= landRight 2 >>= landLeft 2 >>= landRight 2 -- Just (2,4)
+
+(0,0) -: landLeft 1 -: landRight 4 -: landLeft (-1) -: landRight (-2) -- (0,2)
+return (0,0) >>= landLeft 1 >>= landRight 4 >>= landLeft (-1) >>= landRight (-2) -- Nothing
+
+(>>) :: (Monad m) => m a -> m b -> m b -- m >> n = m >>= \_ -> n
+Nothing >> Just 3 -- Nothing
+Just 3 >> Just 4 -- Just 4
+Just 3 >> Nothing -- Nothing
+
+Nothing >>= (\x -> Just "!" >>= (\y -> Just (show x ++ y))) -- Nothing
+Just 3 >>= (\x -> Nothing >>= (\y -> Just (show x ++ y))) -- Nothing
+Just 3 >>= (\x -> Just "!" >>= (\y -> Nothing)) -- Nothing
+
+-- avoid lambdas with do notation
+foo :: Maybe String
+foo = do
+    x <- Just 3
+    y <- Just "!"
+    Just (show x ++ y)
+
+marySue :: Maybe Bool
+marySue = do
+    x <- Just 9
+    Just (x > 8)
+
+routine :: Maybe Pole
+routine = do
+    start <- return (0,0)
+    first <- landLeft 2 start
+    second <- landRight 2 first
+    landLeft 1 second
+routine -- Just (3,2)
+
+justH :: Maybe Char
+justH = do
+    (x:xs) <- Just "hello"
+    return x
+justH -- Just "H"
+
+-- Resort to Nothing for errors, write a fail
+fail :: (Monad m) => String -> m a
+fail msg = error msg
+
+instance Monad Maybe where
+    fail _ = Nothing
+
+wopwop :: Maybe Char
+wopwop = do
+    (x:xs) <- Just ""
+    return x
+
+wopwop -- Nothing
+
+-- **Lists as Monads**
+-- remember lists are Applicatives?
+(*) <$> [1,2,3] <*> [10,100,1000]
+-- [1*, 2*, 3*] <*> [10,100,1000]
+-- fmap 1* [10,100,1000] ++ fmap 2* [10,100,1000] ++ fmap 3* [10,100,1000]
+-- [10,100,1000,20,200,2000,30,300,3000]
+
+instance Monad [] where
+    return x = [x]
+    xs >>= f = concat (map f xs)
+    fail _ = []
+
+[3,4,5] >>= \x -> [x,-x]
+-- [[3,-3],[4,-4],[5,-5]]
+-- [3,-3,4,-4,5,-5]
+
+[] >>= \x -> ["bad","mad","rad"] -- []
+[1,2,3] >>= \x -> [] -- []
+
+[1,2] >>= \n -> ['a','b'] >>= \ch -> return (n,ch)
+-- interpreted like
+[1,2] >>= \n -> (['a','b'] >>= \ch -> return (n,ch))
+[1,2] >>= \n -> [(n,'a'), (n,'b')]
+ -- [(1,'a'),(1,'b'),(2,'a'),(2,'b')]
+
+[ x | x <- [1..50], '7' `elem` show x ] -- [7,17,27,37,47]
+
+-- composing monadic functions
+(<=<) :: (Monad m) => (b -> m c) -> (a -> m b) -> (a -> m c)
+f <=< g = (\x -> g x >>= f)
+
+let f x = [x,-x]
+let g x = [x*3,x*2]
+let h = f <=< g
+h 3 -- [9,-9,6,-6]
